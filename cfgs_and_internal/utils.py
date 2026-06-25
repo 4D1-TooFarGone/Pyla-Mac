@@ -130,7 +130,7 @@ def _get_project_root():
     import sys
     from pathlib import Path
     if getattr(sys, 'frozen', False):
-        return Path(sys.executable).parent.parent
+        return Path(sys.executable).parent
     return Path.cwd().resolve()
 
 

@@ -1,0 +1,86 @@
+name: Package Python App with PyInstaller
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Allows you to run this manually anytime
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Runs the exact same steps on both operating systems
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+    - name: Checkout repository code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11.x'
+        cache: 'pip' # Speeds up future builds by caching downloads
+
+    - name: Verify environment and requirements
+      run: |
+        python --version
+        python -m pip --version
+        ls -l cfgs_and_internal/requirements.txt
+        python -m pip install --upgrade pip setuptools wheel
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        fi
+        grep -v 'scrcpy-client\|torch' cfgs_and_internal/requirements.txt | python -m pip install -r /dev/stdin pyinstaller
+        python -m pip install --no-deps "scrcpy-client @ git+https://github.com/leng-yue/py-scrcpy-client.git@v0.5.0"
+
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller --onefile cfgs_and_internal/main.py
+        cp -R cfgs_and_internal/cfg dist/ || true
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          cp start_linux.sh dist/start.sh
+          chmod +x dist/start.sh
+        else
+          cp start_mac.command dist/start.command
+          chmod +x dist/start.command
+        fi
+
+    - name: Zip dist folder
+      run: |
+        cd dist
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          zip -r ../pyla-linux.zip .
+        else
+          zip -r ../pyla-mac.zip .
+        fi
+
+    - name: Upload executable as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ runner.os == 'Linux' && 'pyla-linux' || 'pyla-mac' }}
+        path: ${{ runner.os == 'Linux' && 'pyla-linux.zip' || 'pyla-mac.zip' }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+
+    - name: Create release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: build-${{ github.run_number }}
+        name: Pyla Build ${{ github.run_number }}
+        files: |
+          artifacts/pyla-linux/pyla-linux.zip
+          artifacts/pyla-mac/pyla-mac.zip
